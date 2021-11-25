@@ -1,0 +1,3 @@
+set -ex
+python train.py --dataroot ../data/train_data --dataset_mode apples --name _apples_pix2pix_pointwise --model pix2pix --netG pointwise --lambda_L1 100 --norm batch --pool_size 0 --input_nc 3 --output_nc 3 --display_ncols 3 --save_epoch_freq 30 --nir_channels_only --act leaky_relu --n_layers_G 6
+python train.py --dataroot ../data/train_data --dataset_mode apples --name _apples_pix2pix_pointwise_no_prep --model pix2pix --netG pointwise --lambda_L1 100 --norm batch --pool_size 0 --input_nc 3 --output_nc 3 --display_ncols 3 --save_epoch_freq 30 --nir_channels_only --act leaky_relu --n_layers_G 6 --no_preprocess_pointwise

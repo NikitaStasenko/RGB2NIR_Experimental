@@ -1,0 +1,2 @@
+set -ex
+python test.py --dataroot ../data/test_data --dataset_mode apples --name apples_cyclegan --model cycle_gan --phase test --no_dropout --netG resnet_6blocks --input_nc 3 --output_nc 3 --nir_channels_only
