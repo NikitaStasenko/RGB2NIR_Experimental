@@ -1,0 +1,1 @@
+python train.py --dataroot datasets/apples_RGB_NIR --dataset_mode aligned --name apples --model pix2pix --norm batch --pool_size 0  --load_size 512 --crop_size 512

@@ -36,24 +36,29 @@ class TestModel(BaseModel):
         """
         assert(not opt.isTrain)
         BaseModel.__init__(self, opt)
+        # specify the training losses you want to print out. The training/test scripts  will call <BaseModel.get_current_losses>
         self.loss_names = []
+        # specify the images you want to save/display. The training/test scripts  will call <BaseModel.get_current_visuals>
         self.visual_names = ['real', 'fake']
-        self.model_names = ['G' + opt.model_suffix]
+        # specify the models you want to save to the disk. The training/test scripts will call <BaseModel.save_networks> and <BaseModel.load_networks>
+        self.model_names = ['G' + opt.model_suffix]  # only generator is needed.
         self.netG = networks.define_G(opt.input_nc, opt.output_nc, opt.ngf, opt.netG,
                                       opt.norm, not opt.no_dropout, opt.init_type, opt.init_gain, self.gpu_ids)
 
-        setattr(self, 'netG' + opt.model_suffix, self.netG)
+        # assigns the model to self.netG_[suffix] so that it can be loaded
+        # please see <BaseModel.load_networks>
+        setattr(self, 'netG' + opt.model_suffix, self.netG)  # store netG in self.
 
-    def set_input(self, _input):
+    def set_input(self, input):
         """Unpack input data from the dataloader and perform necessary pre-processing steps.
 
         Parameters:
-            _input: a dictionary that contains the data itself and its metadata information.
+            input: a dictionary that contains the data itself and its metadata information.
 
         We need to use 'single_dataset' dataset mode. It only load images from one domain.
         """
-        self.real = _input['A'].to(self.device)
-        self.image_paths = _input['A_paths']
+        self.real = input['A'].to(self.device)
+        self.image_paths = input['A_paths']
 
     def forward(self):
         """Run forward pass."""

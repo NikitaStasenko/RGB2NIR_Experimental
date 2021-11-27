@@ -1,0 +1,1 @@
+python test.py --dataroot datasets/apples_RGB_NIR/testA --dataset_mode single --model test --name apples --direction AtoB  --load_size 512 --crop_size 512 --norm batch --netG unet_256

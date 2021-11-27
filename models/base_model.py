@@ -1,5 +1,4 @@
 import os
-import sys
 import torch
 from collections import OrderedDict
 from abc import ABC, abstractmethod
@@ -35,8 +34,8 @@ class BaseModel(ABC):
         self.isTrain = opt.isTrain
         self.device = torch.device('cuda:{}'.format(self.gpu_ids[0])) if self.gpu_ids else torch.device('cpu')  # get device name: CPU or GPU
         self.save_dir = os.path.join(opt.checkpoints_dir, opt.name)  # save all the checkpoints to save_dir
-
-        torch.backends.cudnn.benchmark = True
+        if opt.preprocess != 'scale_width':  # with [scale_width], input images might have different sizes, which hurts the performance of cudnn.benchmark.
+            torch.backends.cudnn.benchmark = True
         self.loss_names = []
         self.model_names = []
         self.visual_names = []
@@ -68,12 +67,7 @@ class BaseModel(ABC):
 
     @abstractmethod
     def forward(self):
-        """Run forward pass; called by <optimize_parameters> function."""
-        pass
-
-    @abstractmethod
-    def inference(self):
-        """Inference on sample; called by <test>. function"""
+        """Run forward pass; called by both functions <optimize_parameters> and <test>."""
         pass
 
     @abstractmethod
@@ -108,7 +102,7 @@ class BaseModel(ABC):
         It also calls <compute_visuals> to produce additional visualization results
         """
         with torch.no_grad():
-            self.inference()
+            self.forward()
             self.compute_visuals()
 
     def compute_visuals(self):
@@ -203,50 +197,6 @@ class BaseModel(ABC):
                 for key in list(state_dict.keys()):  # need to copy keys here because we mutate in loop
                     self.__patch_instance_norm_state_dict(state_dict, net, key.split('.'))
                 net.load_state_dict(state_dict)
-
-    def load_network(self, network, network_label, epoch_label, save_dir=''):
-        if isinstance(network, torch.nn.DataParallel):
-            network = network.module
-        save_filename = '%s_net_%s.pth' % (epoch_label, network_label)
-        if not save_dir:
-            save_dir = self.save_dir
-        save_path = os.path.join(save_dir, save_filename)
-        if not os.path.isfile(save_path):
-            print('%s not exists yet!' % save_path)
-            if network_label == 'G':
-                raise ('Generator must exist!')
-        else:
-            try:
-                network.load_state_dict(torch.load(save_path).items())
-            except:
-                pretrained_dict = torch.load(save_path)
-                model_dict = network.state_dict()
-                try:
-                    pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-                    network.load_state_dict(pretrained_dict)
-                    if self.opt.verbose:
-                        print(
-                            'Pretrained network %s has excessive layers; Only loading layers that are used' % network_label)
-                except:
-                    print('Pretrained network %s has fewer layers; The following are not initialized:' % network_label)
-                    for k, v in pretrained_dict.items():
-                        if v.size() == model_dict[k].size():
-                            model_dict[k] = v
-                        else:
-                            print(f"For module {k} sizes doesn't match: {v.size()}, {model_dict[k].size()}")
-
-                    if sys.version_info >= (3, 0):
-                        not_initialized = set()
-                    else:
-                        from sets import Set
-                        not_initialized = Set()
-
-                    for k, v in model_dict.items():
-                        if k not in pretrained_dict or v.size() != pretrained_dict[k].size():
-                            not_initialized.add(k.split('.')[0])
-
-                    print(f'Not initialized: {sorted(not_initialized)}')
-                    network.load_state_dict(model_dict)
 
     def print_networks(self, verbose):
         """Print the total number of parameters in the network and (if verbose) network architecture

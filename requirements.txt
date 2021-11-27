@@ -5,3 +5,4 @@ visdom>=0.1.8.8
 albumentations>=0.5.2
 scikit-image>=0.18.1
 deep_pipe>=0.1.1
+torchio

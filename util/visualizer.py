@@ -7,13 +7,18 @@ from . import util, html
 from subprocess import Popen, PIPE
 
 
+try:
+    import wandb
+except ImportError:
+    print('Warning: wandb package cannot be found. The option "--use_wandb" will result in error.')
+
 if sys.version_info[0] == 2:
     VisdomExceptionBase = Exception
 else:
     VisdomExceptionBase = ConnectionError
 
 
-def save_images(webpage, visuals, image_path, aspect_ratio=1.0, width=256):
+def save_images(webpage, visuals, image_path, aspect_ratio=1.0, width=256, use_wandb=False):
     """Save images to the disk.
 
     Parameters:
@@ -31,22 +36,20 @@ def save_images(webpage, visuals, image_path, aspect_ratio=1.0, width=256):
 
     webpage.add_header(name)
     ims, txts, links = [], [], []
-
+    ims_dict = {}
     for label, im_data in visuals.items():
-        if label.find('_A_') != -1:
-            continue
         im = util.tensor2im(im_data)
-        n_channels = im.shape[2]
-        for i in range(n_channels):
-            img = np.tile(im[:, :, i][:, :, None], (1, 1, 3))
-            image_name = '%s_%s_channel%d.png' % (name, label, i)
-            save_path = os.path.join(image_dir, image_name)
-            util.save_image(img, save_path, aspect_ratio=aspect_ratio)
-            ims.append(image_name)
-            txts.append(label + '_channel' + str(i))
-            links.append(image_name)
-
+        image_name = '%s_%s.png' % (name, label)
+        save_path = os.path.join(image_dir, image_name)
+        util.save_image(im, save_path, aspect_ratio=aspect_ratio)
+        ims.append(image_name)
+        txts.append(label)
+        links.append(image_name)
+        if use_wandb:
+            ims_dict[label] = wandb.Image(im)
     webpage.add_images(ims, txts, links, width=width)
+    if use_wandb:
+        wandb.log(ims_dict)
 
 
 class Visualizer():
@@ -65,26 +68,32 @@ class Visualizer():
         Step 3: create an HTML object for saveing HTML filters
         Step 4: create a logging file to store training losses
         """
-        self.opt = opt
+        self.opt = opt  # cache the option
         self.display_id = opt.display_id
         self.use_html = opt.isTrain and not opt.no_html
         self.win_size = opt.display_winsize
         self.name = opt.name
         self.port = opt.display_port
         self.saved = False
-        if self.display_id > 0:
+        self.use_wandb = opt.use_wandb
+        self.current_epoch = 0
+        if self.display_id > 0:  # connect to a visdom server given <display_port> and <display_server>
             import visdom
             self.ncols = opt.display_ncols
             self.vis = visdom.Visdom(server=opt.display_server, port=opt.display_port, env=opt.display_env)
             if not self.vis.check_connection():
                 self.create_visdom_connections()
 
-        if self.use_html:
+        if self.use_wandb:
+            self.wandb_run = wandb.init(project='CycleGAN-and-pix2pix', name=opt.name, config=opt) if not wandb.run else wandb.run
+            self.wandb_run._label(repo='CycleGAN-and-pix2pix')
+
+        if self.use_html:  # create an HTML object at <checkpoints_dir>/web/; images will be saved under <checkpoints_dir>/web/images/
             self.web_dir = os.path.join(opt.checkpoints_dir, opt.name, 'web')
             self.img_dir = os.path.join(self.web_dir, 'images')
             print('create web directory %s...' % self.web_dir)
             util.mkdirs([self.web_dir, self.img_dir])
-
+        # create a logging file to store training losses
         self.log_name = os.path.join(opt.checkpoints_dir, opt.name, 'loss_log.txt')
         with open(self.log_name, "a") as log_file:
             now = time.strftime("%c")
@@ -109,42 +118,30 @@ class Visualizer():
             epoch (int) - - the current epoch
             save_result (bool) - - if save the current results to an HTML file
         """
-        if self.display_id > 0:
+        if self.display_id > 0 or self.use_wandb:  # show images in the browser using visdom
             ncols = self.ncols
-            if ncols > 0:
-                visuals_len = 0
-                for _, image in visuals.items():
-                    image_numpy = util.tensor2im(image)
-                    n_channels = image_numpy.shape[2]
-                    visuals_len += n_channels
-
-                ncols = min(ncols, visuals_len)
-                h, w = image_numpy.shape[:2]
+            if ncols > 0:        # show all the images in one visdom panel
+                ncols = min(ncols, len(visuals))
+                h, w = next(iter(visuals.values())).shape[:2]
                 table_css = """<style>
                         table {border-collapse: separate; border-spacing: 4px; white-space: nowrap; text-align: center}
                         table td {width: % dpx; height: % dpx; padding: 4px; outline: 4px solid black}
-                        </style>""" % (w, h)
-
+                        </style>""" % (w, h)  # create a table css
+                # create a table of images.
                 title = self.name
                 label_html = ''
                 label_html_row = ''
                 images = []
                 idx = 0
                 for label, image in visuals.items():
-                    if label.find('_A_') != -1:
-                        continue
                     image_numpy = util.tensor2im(image)
-                    n_channels = image_numpy.shape[2]
-                    for i in range(n_channels):
-                        label_html_row += '<td>%s_channel%d</td>' % (label,  i)
-                        img = np.tile(image_numpy[:, :, i][:, :, None], (1, 1, 3))
-                        images.append(img.transpose([2, 0, 1]))
-                        idx += 1
-                        if idx % ncols == 0:
-                            label_html += '<tr>%s</tr>' % label_html_row
-                            label_html_row = ''
-
-                white_image = np.ones((3, h, w)) * 255
+                    label_html_row += '<td>%s</td>' % label
+                    images.append(image_numpy.transpose([2, 0, 1]))
+                    idx += 1
+                    if idx % ncols == 0:
+                        label_html += '<tr>%s</tr>' % label_html_row
+                        label_html_row = ''
+                white_image = np.ones_like(image_numpy.transpose([2, 0, 1])) * 255
                 while idx % ncols != 0:
                     images.append(white_image)
                     label_html_row += '<td></td>'
@@ -160,53 +157,55 @@ class Visualizer():
                 except VisdomExceptionBase:
                     self.create_visdom_connections()
 
-            else:
+            else:     # show each image in a separate visdom panel;
                 idx = 1
                 try:
                     for label, image in visuals.items():
-                        if label.find('_A_') != -1:
-                            continue
                         image_numpy = util.tensor2im(image)
-                        n_channels = image_numpy.shape[2]
-
-                        for i in range(n_channels):
-                            img = np.tile(image_numpy[:, :, i][:, :, None], (1, 1, 3))
-                            self.vis.image(img.transpose([2, 0, 1]), opts=dict(title=label+'_channel'+str(i)),
-                                           win=self.display_id + idx)
-                            idx += 1
-
+                        self.vis.image(image_numpy.transpose([2, 0, 1]), opts=dict(title=label),
+                                       win=self.display_id + idx)
+                        idx += 1
                 except VisdomExceptionBase:
                     self.create_visdom_connections()
 
-        if self.use_html and (save_result or not self.saved):
+            if self.use_wandb:
+                columns = [key for key, _ in visuals.items()]
+                columns.insert(0,'epoch')
+                result_table = wandb.Table(columns=columns)
+                table_row = [epoch]
+                ims_dict = {}
+                for label, image in visuals.items():
+                    image_numpy = util.tensor2im(image)
+                    wandb_image = wandb.Image(image_numpy)
+                    table_row.append(wandb_image)
+                    ims_dict[label] = wandb_image
+                self.wandb_run.log(ims_dict)
+                if epoch != self.current_epoch:
+                    self.current_epoch = epoch
+                    result_table.add_data(*table_row)
+                    self.wandb_run.log({"Result": result_table})
+
+
+        if self.use_html and (save_result or not self.saved):  # save images to an HTML file if they haven't been saved.
             self.saved = True
+            # save images to the disk
             for label, image in visuals.items():
-                if label.find('_A_') != -1:
-                    continue
                 image_numpy = util.tensor2im(image)
-                n_channels = image_numpy.shape[2]
+                img_path = os.path.join(self.img_dir, 'epoch%.3d_%s.png' % (epoch, label))
+                util.save_image(image_numpy, img_path)
 
-                for i in range(n_channels):
-                    img = np.tile(image_numpy[:, :, i][:, :, None], (1, 1, 3))
-                    img_path = os.path.join(self.img_dir, 'epoch%.3d_%s_channel%d.png' % (epoch, label, i))
-                    util.save_image(img, img_path)
-
-
+            # update website
             webpage = html.HTML(self.web_dir, 'Experiment name = %s' % self.name, refresh=1)
             for n in range(epoch, 0, -1):
                 webpage.add_header('epoch [%d]' % n)
                 ims, txts, links = [], [], []
 
                 for label, image_numpy in visuals.items():
-                    if label.find('_A_') != -1:
-                        continue
-
-                    for i in range(3):
-                        img_path = 'epoch%.3d_%s_channel%d.png' % (n, label, i)
-                        ims.append(img_path)
-                        txts.append(label + '_channel' + str(i))
-                        links.append(img_path)
-
+                    image_numpy = util.tensor2im(image)
+                    img_path = 'epoch%.3d_%s.png' % (n, label)
+                    ims.append(img_path)
+                    txts.append(label)
+                    links.append(img_path)
                 webpage.add_images(ims, txts, links, width=self.win_size)
             webpage.save()
 
@@ -234,7 +233,10 @@ class Visualizer():
                 win=self.display_id)
         except VisdomExceptionBase:
             self.create_visdom_connections()
+        if self.use_wandb:
+            self.wandb_run.log(losses)
 
+    # losses: same format as |losses| of plot_current_losses
     def print_current_losses(self, epoch, iters, losses, t_comp, t_data):
         """print current losses on console; also save the losses to the disk
 
@@ -249,6 +251,6 @@ class Visualizer():
         for k, v in losses.items():
             message += '%s: %.3f ' % (k, v)
 
-        print(message)
+        print(message)  # print the message
         with open(self.log_name, "a") as log_file:
-            log_file.write('%s\n' % message)
+            log_file.write('%s\n' % message)  # save the message

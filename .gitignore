@@ -127,3 +127,18 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Local data
+tmp/
+datasets/apples_RGB_NIR
+datasets/apples_RGB_NIR.zip
+
+# VSCode configs
+.vscode/
+
+# Train/test results
+checkpoints/
+results/
+
+configs/
+train_test_demo.ipynb
